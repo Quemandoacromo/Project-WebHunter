@@ -89,8 +89,8 @@ impl<'a> XssScanner<'a> {
                 continue;
             }
 
-            'param_loop: for i in 0..query_pairs.len() {
-                let tested_param = query_pairs[i].0.clone();
+            'param_loop: for (i, (tested_param, _)) in query_pairs.iter().enumerate() {
+                let tested_param = tested_param.clone();
                 for (technique, payloads) in &self.payloads {
                     for payload in payloads {
                         let new_url = inject_query_param(url, i, |_| payload.to_string());

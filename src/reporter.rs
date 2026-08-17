@@ -400,6 +400,27 @@ impl Reporter {
         );
     }
 
+    pub fn report_open_redirect(&self, vuln: &crate::open_redirect_scanner::OpenRedirectVulnerability) {
+        self.write_report(
+            "Open-Redirect-output.md",
+            "Open Redirect Vulnerability Detected",
+            &[
+                ("Severity", self.get_severity_badge(&vuln.severity)),
+                ("URL", Self::link(&vuln.url)),
+                ("Parameter", vuln.parameter.clone()),
+                ("Redirect Target", vuln.redirect_url.clone()),
+            ],
+            Some(("", &vuln.payload)),
+            Some(&vuln.description),
+            &[
+                "Never redirect to user-supplied URLs without validation",
+                "Use an allowlist of permitted redirect destinations",
+                "Validate the redirect target against the same origin",
+                "Avoid open proxies or URL-forwarding endpoints",
+            ],
+        );
+    }
+
     pub fn report_ssrf(&self, vuln: &crate::ssrf_scanner::SsrfVulnerability) {
         let severity = format!(
             "{} **{}**",

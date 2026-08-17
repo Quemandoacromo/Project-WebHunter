@@ -76,8 +76,8 @@ impl<'a> FileInclusionScanner<'a> {
                 continue;
             }
 
-            'param_loop: for i in 0..query_pairs.len() {
-                let tested_param = query_pairs[i].0.clone();
+            'param_loop: for (i, (tested_param, _)) in query_pairs.iter().enumerate() {
+                let tested_param = tested_param.clone();
                 for payload in &self.payloads {
                     let new_url = inject_query_param(url, i, |_| payload.to_string());
 

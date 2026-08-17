@@ -26,6 +26,7 @@ mod exposed_files_scanner;
 mod file_inclusion_scanner;
 mod form;
 mod inject;
+mod open_redirect_scanner;
 mod rate_limiter;
 mod reporter;
 mod sql_injection_scanner;
@@ -162,7 +163,7 @@ struct Cli {
     #[arg(long)]
     target_list: Option<String>,
 
-    /// The type of scanner to use (xss, dir, file, sql, bypass, cors, ssrf, exposed)
+    /// The type of scanner to use (xss, dir, file, sql, bypass, csrf, auth, bac, blind, exposed, cors, ssrf, redirect)
     #[arg(short, long)]
     scanner: Option<String>,
 
@@ -271,6 +272,7 @@ async fn run_scan(cli: &Cli, rate_limiter: &Arc<rate_limiter::RateLimiter>, targ
             "exposed" => 9,
             "cors" => 10,
             "ssrf" => 11,
+            "redirect" | "open-redirect" | "open_redirect" => 12,
             _ => 0,
         },
         None => match Select::with_theme(&ColorfulTheme::default())
@@ -288,6 +290,7 @@ async fn run_scan(cli: &Cli, rate_limiter: &Arc<rate_limiter::RateLimiter>, targ
                 "Exposed Files (Source Maps & Debug Endpoints)",
                 "CORS Misconfiguration",
                 "SSRF (Server-Side Request Forgery)",
+                "Open Redirect",
             ])
             .interact()
         {
@@ -758,6 +761,28 @@ async fn run_scan(cli: &Cli, rate_limiter: &Arc<rate_limiter::RateLimiter>, targ
             );
             run_with_progress("SSRF scan", total_checks as u64, &m, &sty, |pb| async move {
                 scanner.scan(&pb).await
+            })
+            .await;
+        }
+        12 => {
+            // Open Redirect Scanner
+            let (found_urls, found_forms) =
+                match collect_scan_targets(cli, &url, &m, &sty, rate_limiter, true).await {
+                    Ok(targets) => targets,
+                    Err(_) => return,
+                };
+
+            let scanner = open_redirect_scanner::OpenRedirectScanner::new(
+                found_urls.clone(),
+                found_forms.clone(),
+                &reporter,
+                Arc::clone(rate_limiter),
+            );
+            let total = (found_urls.len() * scanner.payloads_count()
+                + found_forms.len() * scanner.payloads_count()) as u64;
+
+            run_with_progress("Open Redirect scan", total, &m, &sty, |pb| async move {
+                scanner.scan(&pb).await.map_err(box_err)
             })
             .await;
         }

