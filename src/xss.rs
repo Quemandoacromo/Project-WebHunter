@@ -1,4 +1,5 @@
 use crate::form::Form;
+use crate::inject::{inject_form_field, inject_query_param, report_found};
 use crate::rate_limiter::RateLimiter;
 use crate::reporter::Reporter;
 use scraper::{Html, Selector};
@@ -36,7 +37,7 @@ impl<'a> XssScanner<'a> {
         rate_limiter: Arc<RateLimiter>,
     ) -> Self {
         let mut payloads = HashMap::new();
-        if let Ok(paths) = fs::read_dir("webhunter/wordlists/xss") {
+        if let Ok(paths) = fs::read_dir("wordlists/xss") {
             for path in paths.flatten() {
                 if let Some(extension) = path.path().extension() {
                     if extension == "txt" {
@@ -89,21 +90,10 @@ impl<'a> XssScanner<'a> {
             }
 
             'param_loop: for i in 0..query_pairs.len() {
+                let tested_param = query_pairs[i].0.clone();
                 for (technique, payloads) in &self.payloads {
                     for payload in payloads {
-                        let mut new_query_parts = Vec::new();
-                        let mut tested_param = String::new();
-                        for (j, (key, value)) in query_pairs.iter().enumerate() {
-                            if i == j {
-                                new_query_parts.push(format!("{}={}", key, payload));
-                                tested_param = key.clone();
-                            } else {
-                                new_query_parts.push(format!("{}={}", key, value));
-                            }
-                        }
-                        let new_query = new_query_parts.join("&");
-                        let mut new_url = url.clone();
-                        new_url.set_query(Some(&new_query));
+                        let new_url = inject_query_param(url, i, |_| payload.to_string());
 
                         self.rate_limiter.wait().await;
                         let response = client.get(new_url.clone()).send().await?;
@@ -121,8 +111,9 @@ impl<'a> XssScanner<'a> {
                                     method: "GET".to_string(),
                                     technique: technique.clone(),
                                 };
-                                println!("[+] XSS Found: {} in {}", vuln.payload, vuln.parameter);
-                                self.reporter.report_xss(&vuln);
+                                report_found("XSS", &vuln.payload, &vuln.parameter, || {
+                                    self.reporter.report_xss(&vuln);
+                                });
                                 continue 'param_loop;
                             }
                         }
@@ -138,18 +129,10 @@ impl<'a> XssScanner<'a> {
 
         for form in &self.forms {
             'input_loop: for i in 0..form.inputs.len() {
+                let tested_param = form.inputs[i].name.clone();
                 for (technique, payloads) in &self.payloads {
                     for payload in payloads {
-                        let mut form_data = HashMap::new();
-                        let mut tested_param = String::new();
-                        for (j, input) in form.inputs.iter().enumerate() {
-                            if i == j {
-                                form_data.insert(input.name.clone(), payload.clone());
-                                tested_param = input.name.clone();
-                            } else {
-                                form_data.insert(input.name.clone(), input.value.clone());
-                            }
-                        }
+                        let form_data = inject_form_field(form, i, |_| payload.to_string());
 
                         let base_action_url = match form.url.join(&form.action) {
                             Ok(url) => url,
@@ -200,11 +183,9 @@ impl<'a> XssScanner<'a> {
                                         method: form.method.to_string(),
                                         technique: technique.clone(),
                                     };
-                                    println!(
-                                        "[+] XSS Found: {} in {}",
-                                        vuln.payload, vuln.parameter
-                                    );
-                                    self.reporter.report_xss(&vuln);
+                                    report_found("XSS", &vuln.payload, &vuln.parameter, || {
+                                        self.reporter.report_xss(&vuln);
+                                    });
                                     continue 'input_loop;
                                 }
                             }

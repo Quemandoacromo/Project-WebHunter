@@ -1,13 +1,12 @@
 use crate::form::Form;
+use crate::inject::{inject_form_field, inject_query_param, report_found};
 use crate::rate_limiter::RateLimiter;
 use crate::reporter::Reporter;
 use indicatif::ProgressBar;
-use serde::Deserialize;
-use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct FileInclusionVulnerability {
     pub url: Url,
     pub parameter: String,
@@ -34,7 +33,7 @@ impl<'a> FileInclusionScanner<'a> {
         rate_limiter: Arc<RateLimiter>,
     ) -> Self {
         let mut payloads = Vec::new();
-        if let Ok(paths) = fs::read_dir("webhunter/wordlists/file_inclusion") {
+        if let Ok(paths) = fs::read_dir("wordlists/file_inclusion") {
             for path in paths.flatten() {
                 if let Some(extension) = path.path().extension() {
                     if extension == "txt" {
@@ -78,20 +77,9 @@ impl<'a> FileInclusionScanner<'a> {
             }
 
             'param_loop: for i in 0..query_pairs.len() {
+                let tested_param = query_pairs[i].0.clone();
                 for payload in &self.payloads {
-                    let mut new_query_parts = Vec::new();
-                    let mut tested_param = String::new();
-                    for (j, (key, value)) in query_pairs.iter().enumerate() {
-                        if i == j {
-                            new_query_parts.push(format!("{}={}", key, payload));
-                            tested_param = key.clone();
-                        } else {
-                            new_query_parts.push(format!("{}={}", key, value));
-                        }
-                    }
-                    let new_query = new_query_parts.join("&");
-                    let mut new_url = url.clone();
-                    new_url.set_query(Some(&new_query));
+                    let new_url = inject_query_param(url, i, |_| payload.to_string());
 
                     self.rate_limiter.wait().await;
                     let response = client.get(new_url.clone()).send().await?;
@@ -107,11 +95,9 @@ impl<'a> FileInclusionScanner<'a> {
                                 payload: payload.to_string(),
                                 vuln_type,
                             };
-                            println!(
-                                "[+] File Inclusion Found: {} in {}",
-                                vuln.payload, vuln.parameter
-                            );
-                            self.reporter.report_file_inclusion(&vuln);
+                            report_found("File Inclusion", &vuln.payload, &vuln.parameter, || {
+                                self.reporter.report_file_inclusion(&vuln);
+                            });
                             continue 'param_loop;
                         }
                     }
@@ -126,17 +112,9 @@ impl<'a> FileInclusionScanner<'a> {
 
         for form in &self.forms {
             'input_loop: for i in 0..form.inputs.len() {
+                let tested_param = form.inputs[i].name.clone();
                 for payload in &self.payloads {
-                    let mut form_data = HashMap::new();
-                    let mut tested_param = String::new();
-                    for (j, input) in form.inputs.iter().enumerate() {
-                        if i == j {
-                            form_data.insert(input.name.clone(), payload.to_string());
-                            tested_param = input.name.clone();
-                        } else {
-                            form_data.insert(input.name.clone(), input.value.clone());
-                        }
-                    }
+                    let form_data = inject_form_field(form, i, |_| payload.to_string());
 
                     let action_url = form.url.join(&form.action).unwrap();
                     self.rate_limiter.wait().await;
@@ -159,11 +137,9 @@ impl<'a> FileInclusionScanner<'a> {
                                 payload: payload.to_string(),
                                 vuln_type,
                             };
-                            println!(
-                                "[+] File Inclusion Found: {} in {}",
-                                vuln.payload, vuln.parameter
-                            );
-                            self.reporter.report_file_inclusion(&vuln);
+                            report_found("File Inclusion", &vuln.payload, &vuln.parameter, || {
+                                self.reporter.report_file_inclusion(&vuln);
+                            });
                             continue 'input_loop;
                         }
                     }

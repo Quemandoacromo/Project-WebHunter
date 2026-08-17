@@ -4,7 +4,6 @@ use axum::{
     routing::get,
     Router,
 };
-use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,12 +11,9 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields reserved for future victim tracking features
 pub struct PayloadContext {
-    pub id: String,
     pub url: url::Url,
     pub parameter: String,
-    pub timestamp: DateTime<Utc>,
     pub detected: bool,
 }
 

@@ -73,281 +73,359 @@ impl Reporter {
         }
     }
 
-    pub fn report_xss(&self, vuln: &crate::xss::Vulnerability) {
-        if let Ok(mut file) = self.get_report_file("XSS-output.md") {
-            let severity_badge = self.get_severity_badge(&vuln.severity);
-            let _ = writeln!(file, "## 🎯 XSS Vulnerability Detected\n");
+    fn link(url: &Url) -> String {
+        format!("[{}]({})", url, url)
+    }
+
+    fn cors_severity_emoji(severity: &str) -> &'static str {
+        if severity.contains("Critical") {
+            "🔴"
+        } else if severity.contains("High") {
+            "🟠"
+        } else {
+            "🟡"
+        }
+    }
+
+    /// One generic markdown writer for every vulnerability type.
+    fn write_report(
+        &self,
+        file_name: &str,
+        title: &str,
+        fields: &[(&str, String)],
+        code_block: Option<(&str, &str)>,
+        description: Option<&str>,
+        remediation: &[&str],
+    ) {
+        if let Ok(mut file) = self.get_report_file(file_name) {
+            let _ = writeln!(file, "## 🎯 {}\n", title);
             let _ = writeln!(file, "| Field | Value |");
             let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | {} |", severity_badge);
-            let _ = writeln!(file, "| **Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(file, "| **Method** | {} |", vuln.method);
-            let _ = writeln!(
-                file,
-                "| **URL** | [{}]({}) |",
-                vuln.proof_of_concept, vuln.proof_of_concept
-            );
-            let _ = writeln!(file, "| **Parameter** | `{}` |", vuln.parameter);
-            let _ = writeln!(file, "| **Technique** | {} |", vuln.technique);
-            let _ = writeln!(
-                file,
-                "\n### 💉 Payload\n```javascript\n{}\n```",
-                vuln.payload
-            );
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Implement proper input validation and output encoding\n- Use Content Security Policy (CSP) headers\n- Employ context-aware escaping");
+            for (key, value) in fields {
+                let _ = writeln!(file, "| **{}** | {} |", key, value);
+            }
+            if let Some((lang, content)) = code_block {
+                let _ = writeln!(file, "\n### 💉 Payload\n```{}\n{}\n```", lang, content);
+            }
+            if let Some(description) = description {
+                let _ = writeln!(file, "\n### 📝 Description\n{}", description);
+            }
+            if !remediation.is_empty() {
+                let _ = writeln!(file, "\n### 🛡️ Remediation");
+                for line in remediation {
+                    let _ = writeln!(file, "- {}", line);
+                }
+            }
             let _ = writeln!(file, "\n---\n");
         }
+    }
+
+    pub fn report_xss(&self, vuln: &crate::xss::Vulnerability) {
+        self.write_report(
+            "XSS-output.md",
+            "XSS Vulnerability Detected",
+            &[
+                ("Severity", self.get_severity_badge(&vuln.severity)),
+                ("Type", vuln.vuln_type.clone()),
+                ("Method", vuln.method.clone()),
+                ("URL", Self::link(&vuln.proof_of_concept)),
+                ("Parameter", vuln.parameter.clone()),
+                ("Technique", vuln.technique.clone()),
+            ],
+            Some(("javascript", &vuln.payload)),
+            None,
+            &[
+                "Implement proper input validation and output encoding",
+                "Use Content Security Policy (CSP) headers",
+                "Employ context-aware escaping",
+            ],
+        );
     }
 
     pub fn report_sql_injection(&self, vuln: &SqlInjectionVulnerability) {
-        if let Ok(mut file) = self.get_report_file("SQL-Injection-output.md") {
-            let _ = writeln!(file, "## 🎯 SQL Injection Vulnerability Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | 🔴 **CRITICAL** |");
-            let _ = writeln!(file, "| **Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Parameter** | `{}` |", vuln.parameter);
-            let _ = writeln!(file, "\n### 💉 Payload\n```sql\n{}\n```", vuln.payload);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Use parameterized queries (prepared statements)\n- Implement proper input validation\n- Apply principle of least privilege to database accounts\n- Use ORMs with built-in protection");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "SQL-Injection-output.md",
+            "SQL Injection Vulnerability Detected",
+            &[
+                ("Severity", "🔴 **CRITICAL**".to_string()),
+                ("Type", vuln.vuln_type.clone()),
+                ("URL", Self::link(&vuln.url)),
+                ("Parameter", vuln.parameter.clone()),
+            ],
+            Some(("sql", &vuln.payload)),
+            None,
+            &[
+                "Use parameterized queries (prepared statements)",
+                "Implement proper input validation",
+                "Apply principle of least privilege to database accounts",
+                "Use ORMs with built-in protection",
+            ],
+        );
     }
 
     pub fn report_file_inclusion(&self, vuln: &FileInclusionVulnerability) {
-        if let Ok(mut file) = self.get_report_file("File-Inclusion-output.md") {
-            let severity = if vuln.vuln_type == "RFI" {
-                "CRITICAL"
-            } else {
-                "HIGH"
-            };
-            let severity_badge = self.get_severity_badge(severity);
-            let _ = writeln!(file, "## 🎯 File Inclusion Vulnerability Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | {} |", severity_badge);
-            let _ = writeln!(file, "| **Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Parameter** | `{}` |", vuln.parameter);
-            let _ = writeln!(file, "\n### 💉 Payload\n```\n{}\n```", vuln.payload);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Never use user input directly in file paths\n- Implement a whitelist of allowed files\n- Use `basename()` to strip directory paths\n- Disable `allow_url_fopen` and `allow_url_include` in PHP");
-            let _ = writeln!(file, "\n---\n");
-        }
+        let severity = if vuln.vuln_type == "RFI" { "CRITICAL" } else { "HIGH" };
+        self.write_report(
+            "File-Inclusion-output.md",
+            "File Inclusion Vulnerability Detected",
+            &[
+                ("Severity", self.get_severity_badge(severity)),
+                ("Type", vuln.vuln_type.clone()),
+                ("URL", Self::link(&vuln.url)),
+                ("Parameter", vuln.parameter.clone()),
+            ],
+            Some(("", &vuln.payload)),
+            None,
+            &[
+                "Never use user input directly in file paths",
+                "Implement a whitelist of allowed files",
+                "Use `basename()` to strip directory paths",
+                "Disable `allow_url_fopen` and `allow_url_include` in PHP",
+            ],
+        );
     }
 
     pub fn report_403_bypass(&self, bypass: &BypassBypass) {
-        if let Ok(mut file) = self.get_report_file("403-Bypass-output.md") {
-            let severity_badge = self.get_severity_badge(&bypass.severity);
-            let _ = writeln!(file, "## 🎯 403/401 Bypass Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | {} |", severity_badge);
-            let _ = writeln!(file, "| **Technique** | {} |", bypass.technique);
-            let _ = writeln!(file, "| **Method** | {} |", bypass.method);
-            let _ = writeln!(
-                file,
-                "| **Original URL** | [{}]({}) |",
-                bypass.url, bypass.url
-            );
-            let _ = writeln!(
-                file,
-                "| **Bypass URL** | [{}]({}) |",
-                bypass.bypass_url, bypass.bypass_url
-            );
-            let _ = writeln!(file, "| **Headers** | `{}` |", bypass.headers);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Implement consistent access control checks\n- Validate authorization on both frontend and backend\n- Use centralized authentication/authorization framework\n- Test with various HTTP methods and headers");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "403-Bypass-output.md",
+            "403/401 Bypass Detected",
+            &[
+                ("Severity", self.get_severity_badge(&bypass.severity)),
+                ("Technique", bypass.technique.clone()),
+                ("Method", bypass.method.clone()),
+                ("Original URL", Self::link(&bypass.url)),
+                ("Bypass URL", Self::link(&bypass.bypass_url)),
+                ("Headers", bypass.headers.clone()),
+            ],
+            None,
+            None,
+            &[
+                "Implement consistent access control checks",
+                "Validate authorization on both frontend and backend",
+                "Use centralized authentication/authorization framework",
+                "Test with various HTTP methods and headers",
+            ],
+        );
     }
 
     pub fn report_directory(&self, url: &Url, status: u16, content_length: u64) {
-        if let Ok(mut file) = self.get_report_file("Open-Directories-output.md") {
-            let _ = writeln!(file, "## 🎯 Open Directory Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | 🟡 **MEDIUM** |");
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", url, url);
-            let _ = writeln!(file, "| **Status Code** | {} |", status);
-            let _ = writeln!(file, "| **Content Length** | {} bytes |", content_length);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Disable directory listing in web server configuration\n- Add index.html/index.php files to all directories\n- Configure proper access controls\n- Review exposed files for sensitive data");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "Open-Directories-output.md",
+            "Open Directory Detected",
+            &[
+                ("Severity", "🟡 **MEDIUM**".to_string()),
+                ("URL", Self::link(url)),
+                ("Status Code", status.to_string()),
+                ("Content Length", format!("{} bytes", content_length)),
+            ],
+            None,
+            None,
+            &[
+                "Disable directory listing in web server configuration",
+                "Add index.html/index.php files to all directories",
+                "Configure proper access controls",
+                "Review exposed files for sensitive data",
+            ],
+        );
     }
 
     pub fn report_exposed_files(
         &self,
         vuln: &crate::exposed_files_scanner::ExposedFileVulnerability,
     ) {
-        if let Ok(mut file) = self.get_report_file("Exposed-Files-output.md") {
-            let severity = if vuln.vuln_type.contains("Source Map") {
-                "🔴 **HIGH**"
-            } else {
-                "🟡 **MEDIUM**"
-            };
-            let _ = writeln!(file, "## 🎯 Exposed File Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | {} |", severity);
-            let _ = writeln!(file, "| **Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(
-                file,
-                "| **Path** | [{}]({}) |",
-                vuln.exposed_path, vuln.exposed_path
-            );
-            let _ = writeln!(file, "\n### 📝 Description\n{}", vuln.description);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Remove source map files from production\n- Disable debug endpoints in production\n- Use environment variables for configuration\n- Implement proper access controls");
-            let _ = writeln!(file, "\n---\n");
-        }
+        let severity = if vuln.vuln_type.contains("Source Map") {
+            "🔴 **HIGH**".to_string()
+        } else {
+            "🟡 **MEDIUM**".to_string()
+        };
+        self.write_report(
+            "Exposed-Files-output.md",
+            "Exposed File Detected",
+            &[
+                ("Severity", severity),
+                ("Type", vuln.vuln_type.clone()),
+                ("Path", format!("[{}]({})", vuln.exposed_path, vuln.exposed_path)),
+            ],
+            None,
+            Some(&vuln.description),
+            &[
+                "Remove source map files from production",
+                "Disable debug endpoints in production",
+                "Use environment variables for configuration",
+                "Implement proper access controls",
+            ],
+        );
     }
 
     pub fn report_dom_xss(&self, vuln: &crate::dom_xss_scanner::DomXssVulnerability) {
-        if let Ok(mut file) = self.get_report_file("DOM-XSS-output.md") {
-            let severity_badge = self.get_severity_badge(&vuln.severity);
-            let _ = writeln!(file, "## 🎯 DOM-Based XSS Vulnerability Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | {} |", severity_badge);
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Source** | `{}` |", vuln.source);
-            let _ = writeln!(file, "| **Sink** | `{}` |", vuln.sink);
-            let _ = writeln!(file, "| **Line Number** | {} |", vuln.line_number);
-            let _ = writeln!(
-                file,
-                "\n### 💉 Vulnerable Code\n```javascript\n{}\n```",
-                vuln.code_snippet
-            );
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Avoid using dangerous sinks (eval, innerHTML, document.write)\n- Use safe APIs like textContent or setAttribute\n- Implement Content Security Policy (CSP)\n- Sanitize data from untrusted sources before DOM manipulation");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "DOM-XSS-output.md",
+            "DOM-Based XSS Vulnerability Detected",
+            &[
+                ("Severity", self.get_severity_badge(&vuln.severity)),
+                ("URL", Self::link(&vuln.url)),
+                ("Source", vuln.source.clone()),
+                ("Sink", vuln.sink.clone()),
+                ("Line Number", vuln.line_number.to_string()),
+            ],
+            Some(("javascript", &vuln.code_snippet)),
+            None,
+            &[
+                "Avoid using dangerous sinks (eval, innerHTML, document.write)",
+                "Use safe APIs like textContent or setAttribute",
+                "Implement Content Security Policy (CSP)",
+                "Sanitize data from untrusted sources before DOM manipulation",
+            ],
+        );
     }
 
     pub fn report_csrf(&self, vuln: &crate::csrf_scanner::CsrfVulnerability) {
-        if let Ok(mut file) = self.get_report_file("CSRF-output.md") {
-            let severity_badge = self.get_severity_badge(&vuln.severity);
-            let _ = writeln!(file, "## 🎯 CSRF Vulnerability Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | {} |", severity_badge);
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Form Action** | {} |", vuln.form_action);
-            let _ = writeln!(file, "| **Method** | {} |", vuln.method);
-            let _ = writeln!(
-                file,
-                "| **Missing Protections** | {} |",
-                vuln.missing_protections.join(", ")
-            );
-            let _ = writeln!(
-                file,
-                "\n### 💉 Proof of Concept\n```html\n{}\n```",
-                vuln.poc_html
-            );
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Implement anti-CSRF tokens (synchronizer token pattern)\n- Use SameSite cookie attribute\n- Validate Origin/Referer headers\n- Require re-authentication for sensitive actions");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "CSRF-output.md",
+            "CSRF Vulnerability Detected",
+            &[
+                ("Severity", self.get_severity_badge(&vuln.severity)),
+                ("URL", Self::link(&vuln.url)),
+                ("Form Action", vuln.form_action.clone()),
+                ("Method", vuln.method.clone()),
+                (
+                    "Missing Protections",
+                    vuln.missing_protections.join(", "),
+                ),
+            ],
+            Some(("html", &vuln.poc_html)),
+            None,
+            &[
+                "Implement anti-CSRF tokens (synchronizer token pattern)",
+                "Use SameSite cookie attribute",
+                "Validate Origin/Referer headers",
+                "Require re-authentication for sensitive actions",
+            ],
+        );
     }
 
     pub fn report_access_control(
         &self,
         vuln: &crate::access_control_scanner::AccessControlVulnerability,
     ) {
-        if let Ok(mut file) = self.get_report_file("Access-Control-output.md") {
-            let severity_badge = self.get_severity_badge(&vuln.severity);
-            let _ = writeln!(file, "## 🎯 Access Control Vulnerability Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | {} |", severity_badge);
-            let _ = writeln!(file, "| **Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Description** | {} |", vuln.description);
-            let _ = writeln!(file, "\n### 💉 Payload\n```\n{}\n```", vuln.payload);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Implement robust authorization checks for all resources\n- Use indirect object references (map user IDs to internal IDs)\n- Enforce role-based access control (RBAC)\n- Deny access by default, explicitly grant only when needed");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "Access-Control-output.md",
+            "Access Control Vulnerability Detected",
+            &[
+                ("Severity", self.get_severity_badge(&vuln.severity)),
+                ("Type", vuln.vuln_type.clone()),
+                ("URL", Self::link(&vuln.url)),
+                ("Description", vuln.description.clone()),
+            ],
+            Some(("", &vuln.payload)),
+            None,
+            &[
+                "Implement robust authorization checks for all resources",
+                "Use indirect object references (map user IDs to internal IDs)",
+                "Enforce role-based access control (RBAC)",
+                "Deny access by default, explicitly grant only when needed",
+            ],
+        );
     }
 
     pub fn report_auth_bypass(&self, vuln: &crate::auth_bypass_scanner::AuthBypassVulnerability) {
-        if let Ok(mut file) = self.get_report_file("Authentication-Bypass-output.md") {
-            let _ = writeln!(file, "## 🎯 Authentication Bypass Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | 🔴 **CRITICAL** |");
-            let _ = writeln!(file, "| **Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Form Action** | {} |", vuln.form_action);
-            let _ = writeln!(file, "| **Description** | {} |", vuln.description);
-            let _ = writeln!(file, "\n### 💉 Payload\n```\n{}\n```", vuln.payload);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Use parameterized queries to prevent SQL injection in auth\n- Remove or change default credentials immediately\n- Implement account lockout after failed attempts\n- Use strong password policies and MFA");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "Authentication-Bypass-output.md",
+            "Authentication Bypass Detected",
+            &[
+                ("Severity", "🔴 **CRITICAL**".to_string()),
+                ("Type", vuln.vuln_type.clone()),
+                ("URL", Self::link(&vuln.url)),
+                ("Form Action", vuln.form_action.clone()),
+                ("Description", vuln.description.clone()),
+            ],
+            Some(("", &vuln.payload)),
+            None,
+            &[
+                "Use parameterized queries to prevent SQL injection in auth",
+                "Remove or change default credentials immediately",
+                "Implement account lockout after failed attempts",
+                "Use strong password policies and MFA",
+            ],
+        );
     }
 
     pub fn report_blind_xss(&self, vuln: &crate::blind_xss_scanner::BlindXssVulnerability) {
-        if let Ok(mut file) = self.get_report_file("Blind-XSS-output.md") {
-            let _ = writeln!(file, "## 🎯 Blind XSS Vulnerability Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(file, "| **Severity** | 🔴 **CRITICAL** |");
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Parameter** | `{}` |", vuln.parameter);
-            let _ = writeln!(file, "| **Payload ID** | {} |", vuln.payload_id);
-            let _ = writeln!(file, "| **Callback Time** | {} |", vuln.callback_time);
-            let _ = writeln!(file, "\n### 📡 Detection Method\nOut-of-band callback received, indicating stored XSS executed in a different context (admin panel, support dashboard, etc.)");
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Implement proper output encoding in ALL contexts\n- Use Content Security Policy (CSP)\n- Sanitize user input before storage\n- Validate and encode data when rendering in admin panels");
-            let _ = writeln!(file, "\n---\n");
-        }
+        self.write_report(
+            "Blind-XSS-output.md",
+            "Blind XSS Vulnerability Detected",
+            &[
+                ("Severity", "🔴 **CRITICAL**".to_string()),
+                ("URL", Self::link(&vuln.url)),
+                ("Parameter", vuln.parameter.clone()),
+                ("Payload ID", vuln.payload_id.clone()),
+                ("Callback Time", vuln.callback_time.to_string()),
+            ],
+            None,
+            Some(
+                "Out-of-band callback received, indicating stored XSS executed in a different context (admin panel, support dashboard, etc.)",
+            ),
+            &[
+                "Implement proper output encoding in ALL contexts",
+                "Use Content Security Policy (CSP)",
+                "Sanitize user input before storage",
+                "Validate and encode data when rendering in admin panels",
+            ],
+        );
     }
 
     pub fn report_cors(&self, vuln: &crate::cors_scanner::CorsVulnerability) {
-        if let Ok(mut file) = self.get_report_file("CORS-Misconfiguration-output.md") {
-            let severity_emoji = if vuln.severity.contains("Critical") {
-                "🔴"
-            } else if vuln.severity.contains("High") {
-                "🟠"
-            } else {
-                "🟡"
-            };
-            let _ = writeln!(file, "## 🎯 CORS Misconfiguration Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(
-                file,
-                "| **Severity** | {} **{}** |",
-                severity_emoji, vuln.severity
-            );
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Test Origin** | `{}` |", vuln.origin);
-            let _ = writeln!(file, "| **Vulnerability Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(file, "\n### 📝 Description\n{}", vuln.description);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Use strict origin allowlist instead of wildcards\n- Avoid `Access-Control-Allow-Credentials: true` with wildcard origins\n- Validate Origin header against a strict allowlist\n- Do not reflect user-controlled Origin values");
-            let _ = writeln!(file, "\n---\n");
-        }
+        let severity = format!(
+            "{} **{}**",
+            Self::cors_severity_emoji(&vuln.severity),
+            vuln.severity
+        );
+        self.write_report(
+            "CORS-Misconfiguration-output.md",
+            "CORS Misconfiguration Detected",
+            &[
+                ("Severity", severity),
+                ("URL", Self::link(&vuln.url)),
+                ("Test Origin", vuln.origin.clone()),
+                ("Vulnerability Type", vuln.vuln_type.clone()),
+            ],
+            None,
+            Some(&vuln.description),
+            &[
+                "Use strict origin allowlist instead of wildcards",
+                "Avoid `Access-Control-Allow-Credentials: true` with wildcard origins",
+                "Validate Origin header against a strict allowlist",
+                "Do not reflect user-controlled Origin values",
+            ],
+        );
     }
 
     pub fn report_ssrf(&self, vuln: &crate::ssrf_scanner::SsrfVulnerability) {
-        if let Ok(mut file) = self.get_report_file("SSRF-output.md") {
-            let severity_emoji = if vuln.severity == "Critical" {
-                "🔴"
-            } else if vuln.severity == "High" {
-                "🟠"
-            } else {
-                "🟡"
-            };
-            let _ = writeln!(file, "## 🎯 SSRF Vulnerability Detected\n");
-            let _ = writeln!(file, "| Field | Value |");
-            let _ = writeln!(file, "|-------|-------|");
-            let _ = writeln!(
-                file,
-                "| **Severity** | {} **{}** |",
-                severity_emoji, vuln.severity
-            );
-            let _ = writeln!(file, "| **URL** | [{}]({}) |", vuln.url, vuln.url);
-            let _ = writeln!(file, "| **Parameter** | `{}` |", vuln.parameter);
-            let _ = writeln!(file, "| **Payload** | `{}` |", vuln.payload);
-            let _ = writeln!(file, "| **Vulnerability Type** | {} |", vuln.vuln_type);
-            let _ = writeln!(file, "\n### 📝 Description\n{}", vuln.description);
-            let _ = writeln!(file, "\n### 🛡️ Remediation\n- Validate and sanitize user-supplied URLs\n- Use allowlist for permitted domains/IPs\n- Disable unnecessary URL schemas (file://, gopher://, etc.)\n- Implement network segmentation\n- Use safe URL parsing libraries that prevent bypasses");
-            let _ = writeln!(file, "\n---\n");
-        }
+        let severity = format!(
+            "{} **{}**",
+            Self::cors_severity_emoji(&vuln.severity),
+            vuln.severity
+        );
+        self.write_report(
+            "SSRF-output.md",
+            "SSRF Vulnerability Detected",
+            &[
+                ("Severity", severity),
+                ("URL", Self::link(&vuln.url)),
+                ("Parameter", vuln.parameter.clone()),
+                ("Payload", vuln.payload.clone()),
+                ("Vulnerability Type", vuln.vuln_type.clone()),
+            ],
+            None,
+            Some(&vuln.description),
+            &[
+                "Validate and sanitize user-supplied URLs",
+                "Use allowlist for permitted domains/IPs",
+                "Disable unnecessary URL schemas (file://, gopher://, etc.)",
+                "Implement network segmentation",
+                "Use safe URL parsing libraries that prevent bypasses",
+            ],
+        );
     }
 }
 #[cfg(test)]

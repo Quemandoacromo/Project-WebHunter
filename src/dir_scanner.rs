@@ -39,7 +39,7 @@ impl<'a> DirScanner<'a> {
         let wordlist = self
             .wordlist_path
             .clone()
-            .unwrap_or("webhunter/default_wordlist.txt".to_string());
+            .unwrap_or("default_wordlist.txt".to_string());
 
         let args = vec![
             "-u",

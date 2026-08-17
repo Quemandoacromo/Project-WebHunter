@@ -1,15 +1,15 @@
 use crate::form::Form;
+use crate::inject::report_found;
 use crate::rate_limiter::RateLimiter;
 use crate::reporter::Reporter;
 use indicatif::ProgressBar;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead};
 use std::sync::Arc;
 use url::Url;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct AuthBypassVulnerability {
     pub url: Url,
     pub form_action: String,
@@ -33,8 +33,8 @@ impl<'a> AuthBypassScanner<'a> {
         rate_limiter: Arc<RateLimiter>,
     ) -> Self {
         let sqli_payloads =
-            Self::load_list("webhunter/wordlists/auth_bypass/sqli_login_bypass.txt");
-        let default_creds = Self::load_creds("webhunter/wordlists/auth_bypass/default_creds.txt");
+            Self::load_list("wordlists/auth_bypass/sqli_login_bypass.txt");
+        let default_creds = Self::load_creds("wordlists/auth_bypass/default_creds.txt");
 
         Self {
             forms,
@@ -162,8 +162,9 @@ impl<'a> AuthBypassScanner<'a> {
                         "Successfully bypassed authentication using SQL injection payload."
                             .to_string(),
                 };
-                println!("[+] Auth Bypass Found: {} in login form", vuln.payload);
-                self.reporter.report_auth_bypass(&vuln);
+                report_found("Auth Bypass", &vuln.payload, "login form", || {
+                    self.reporter.report_auth_bypass(&vuln);
+                });
                 return Ok(()); // Stop after first success to avoid noise
             }
         }

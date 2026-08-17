@@ -1,14 +1,13 @@
 use crate::form::Form;
+use crate::inject::{inject_form_field, inject_query_param, report_found};
 use crate::rate_limiter::RateLimiter;
 use crate::reporter::Reporter;
 use indicatif::ProgressBar;
-use serde::Deserialize;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use url::Url;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct SqlInjectionVulnerability {
     pub url: Url,
     pub parameter: String,
@@ -37,14 +36,14 @@ impl<'a> SqlInjectionScanner<'a> {
         rate_limiter: Arc<RateLimiter>,
     ) -> Self {
         let mut error_based_payloads =
-            Self::load_payloads("webhunter/wordlists/sql_injection/error_based.txt");
+            Self::load_payloads("wordlists/sql_injection/error_based.txt");
         error_based_payloads.extend(Self::load_payloads(
-            "webhunter/wordlists/sql_injection/original_payloads.txt",
+            "wordlists/sql_injection/original_payloads.txt",
         ));
         let boolean_based_payloads =
-            Self::load_boolean_payloads("webhunter/wordlists/sql_injection/boolean_based.txt");
+            Self::load_boolean_payloads("wordlists/sql_injection/boolean_based.txt");
         let time_based_payloads =
-            Self::load_payloads("webhunter/wordlists/sql_injection/time_based.txt");
+            Self::load_payloads("wordlists/sql_injection/time_based.txt");
 
         Self {
             target_urls,
@@ -148,30 +147,9 @@ impl<'a> SqlInjectionScanner<'a> {
         pb: &ProgressBar,
     ) -> Result<bool, reqwest::Error> {
         let query_pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
-
-        let mut true_query_parts = Vec::new();
-        let mut false_query_parts = Vec::new();
-        let mut tested_param = String::new();
-
-        for (j, (key, value)) in query_pairs.iter().enumerate() {
-            if param_index == j {
-                true_query_parts.push(format!("{}={}{}", key, value, true_payload));
-                false_query_parts.push(format!("{}={}{}", key, value, false_payload));
-                tested_param = key.clone();
-            } else {
-                true_query_parts.push(format!("{}={}", key, value));
-                false_query_parts.push(format!("{}={}", key, value));
-            }
-        }
-
-        let true_query = true_query_parts.join("&");
-        let false_query = false_query_parts.join("&");
-
-        let mut true_url = url.clone();
-        true_url.set_query(Some(&true_query));
-
-        let mut false_url = url.clone();
-        false_url.set_query(Some(&false_query));
+        let tested_param = query_pairs[param_index].0.clone();
+        let true_url = inject_query_param(url, param_index, |value| format!("{}{}", value, true_payload));
+        let false_url = inject_query_param(url, param_index, |value| format!("{}{}", value, false_payload));
 
         self.rate_limiter.wait().await;
         if let (Some(true_response), Some(false_response)) = (
@@ -210,22 +188,8 @@ impl<'a> SqlInjectionScanner<'a> {
         pb: &ProgressBar,
     ) -> Result<bool, reqwest::Error> {
         let query_pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
-
-        let mut new_query_parts = Vec::new();
-        let mut tested_param = String::new();
-
-        for (j, (key, value)) in query_pairs.iter().enumerate() {
-            if param_index == j {
-                new_query_parts.push(format!("{}={}{}", key, value, payload));
-                tested_param = key.clone();
-            } else {
-                new_query_parts.push(format!("{}={}", key, value));
-            }
-        }
-
-        let new_query = new_query_parts.join("&");
-        let mut new_url = url.clone();
-        new_url.set_query(Some(&new_query));
+        let tested_param = query_pairs[param_index].0.clone();
+        let new_url = inject_query_param(url, param_index, |value| format!("{}{}", value, payload));
 
         let start = Instant::now();
         self.rate_limiter.wait().await;
@@ -238,12 +202,9 @@ impl<'a> SqlInjectionScanner<'a> {
                     payload: payload.to_string(),
                     vuln_type: "Time-Based".to_string(),
                 };
-                println!(
-                    "[+] SQL Injection Found: {} in {}",
-                    vuln.payload, vuln.parameter
-                );
-                self.reporter.report_sql_injection(&vuln);
-                return Ok(true);
+                return Ok(report_found("SQL Injection", &vuln.payload, &vuln.parameter, || {
+                    self.reporter.report_sql_injection(&vuln);
+                }));
             }
         }
         pb.inc(1);
@@ -303,16 +264,8 @@ impl<'a> SqlInjectionScanner<'a> {
         param_index: usize,
         pb: &ProgressBar,
     ) -> Result<bool, reqwest::Error> {
-        let mut form_data = HashMap::new();
-        let mut tested_param = String::new();
-        for (j, input) in form.inputs.iter().enumerate() {
-            if param_index == j {
-                form_data.insert(input.name.clone(), payload.to_string());
-                tested_param = input.name.clone();
-            } else {
-                form_data.insert(input.name.clone(), input.value.clone());
-            }
-        }
+        let tested_param = form.inputs[param_index].name.clone();
+        let form_data = inject_form_field(form, param_index, |_| payload.to_string());
 
         let action_url = match form.url.join(&form.action) {
             Ok(url) => url,
@@ -338,12 +291,9 @@ impl<'a> SqlInjectionScanner<'a> {
                     payload: payload.to_string(),
                     vuln_type: "Error-Based".to_string(),
                 };
-                println!(
-                    "[+] SQL Injection Found: {} in {}",
-                    vuln.payload, vuln.parameter
-                );
-                self.reporter.report_sql_injection(&vuln);
-                return Ok(true);
+                return Ok(report_found("SQL Injection", &vuln.payload, &vuln.parameter, || {
+                    self.reporter.report_sql_injection(&vuln);
+                }));
             }
         }
         Ok(false)
@@ -358,19 +308,9 @@ impl<'a> SqlInjectionScanner<'a> {
         param_index: usize,
         pb: &ProgressBar,
     ) -> Result<bool, reqwest::Error> {
-        let mut true_form_data = HashMap::new();
-        let mut false_form_data = HashMap::new();
-        let mut tested_param = String::new();
-        for (j, input) in form.inputs.iter().enumerate() {
-            if param_index == j {
-                true_form_data.insert(input.name.clone(), true_payload.to_string());
-                false_form_data.insert(input.name.clone(), false_payload.to_string());
-                tested_param = input.name.clone();
-            } else {
-                true_form_data.insert(input.name.clone(), input.value.clone());
-                false_form_data.insert(input.name.clone(), input.value.clone());
-            }
-        }
+        let tested_param = form.inputs[param_index].name.clone();
+        let true_form_data = inject_form_field(form, param_index, |_| true_payload.to_string());
+        let false_form_data = inject_form_field(form, param_index, |_| false_payload.to_string());
 
         let action_url = match form.url.join(&form.action) {
             Ok(url) => url,
@@ -425,12 +365,9 @@ impl<'a> SqlInjectionScanner<'a> {
                     payload: format!("{} / {}", true_payload, false_payload),
                     vuln_type: "Boolean-Based".to_string(),
                 };
-                println!(
-                    "[+] SQL Injection Found: {} in {}",
-                    vuln.payload, vuln.parameter
-                );
-                self.reporter.report_sql_injection(&vuln);
-                return Ok(true);
+                return Ok(report_found("SQL Injection", &vuln.payload, &vuln.parameter, || {
+                    self.reporter.report_sql_injection(&vuln);
+                }));
             }
         }
         Ok(false)
@@ -444,16 +381,8 @@ impl<'a> SqlInjectionScanner<'a> {
         param_index: usize,
         pb: &ProgressBar,
     ) -> Result<bool, reqwest::Error> {
-        let mut form_data = HashMap::new();
-        let mut tested_param = String::new();
-        for (j, input) in form.inputs.iter().enumerate() {
-            if param_index == j {
-                form_data.insert(input.name.clone(), payload.to_string());
-                tested_param = input.name.clone();
-            } else {
-                form_data.insert(input.name.clone(), input.value.clone());
-            }
-        }
+        let tested_param = form.inputs[param_index].name.clone();
+        let form_data = inject_form_field(form, param_index, |_| payload.to_string());
 
         let action_url = match form.url.join(&form.action) {
             Ok(url) => url,
@@ -499,22 +428,8 @@ impl<'a> SqlInjectionScanner<'a> {
         pb: &ProgressBar,
     ) -> Result<bool, reqwest::Error> {
         let query_pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
-
-        let mut new_query_parts = Vec::new();
-        let mut tested_param = String::new();
-
-        for (j, (key, value)) in query_pairs.iter().enumerate() {
-            if param_index == j {
-                new_query_parts.push(format!("{}={}{}", key, value, payload));
-                tested_param = key.clone();
-            } else {
-                new_query_parts.push(format!("{}={}", key, value));
-            }
-        }
-
-        let new_query = new_query_parts.join("&");
-        let mut new_url = url.clone();
-        new_url.set_query(Some(&new_query));
+        let tested_param = query_pairs[param_index].0.clone();
+        let new_url = inject_query_param(url, param_index, |value| format!("{}{}", value, payload));
 
         self.rate_limiter.wait().await;
         if let Some(response) = self.send_get_request(client, &new_url).await {

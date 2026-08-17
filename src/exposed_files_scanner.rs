@@ -2,14 +2,13 @@ use crate::rate_limiter::RateLimiter;
 use crate::reporter::Reporter;
 use indicatif::ProgressBar;
 use reqwest::Client;
-use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, BufRead};
 use std::sync::Arc;
 use url::Url;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ExposedFileVulnerability {
     pub url: Url,

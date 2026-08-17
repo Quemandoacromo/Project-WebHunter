@@ -2,14 +2,12 @@ use crate::rate_limiter::RateLimiter;
 use crate::reporter::Reporter;
 use indicatif::ProgressBar;
 use reqwest::Client;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use url::Url;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct SsrfVulnerability {
     pub url: Url,
     pub parameter: String,
@@ -29,7 +27,6 @@ pub struct SsrfScanner<'a> {
     client: Client,
     found: HashSet<String>,
     callback_url: String,
-    callback_results: Arc<Mutex<HashMap<String, Vec<String>>>>,
 }
 
 impl<'a> SsrfScanner<'a> {
@@ -91,8 +88,6 @@ impl<'a> SsrfScanner<'a> {
             "format",
             "read",
             "gf",
-            "page",
-            "view",
             "action",
             "id",
             "campaign",
@@ -122,7 +117,6 @@ impl<'a> SsrfScanner<'a> {
             client: Client::new(),
             found: HashSet::new(),
             callback_url,
-            callback_results: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -171,8 +165,6 @@ impl<'a> SsrfScanner<'a> {
 
         self.test_existing_params(pb).await?;
         self.test_common_params(pb).await?;
-
-        self.report_callback_findings().await;
 
         pb.finish_with_message("SSRF scan complete.");
         Ok(())
@@ -410,22 +402,6 @@ impl<'a> SsrfScanner<'a> {
             || payload.contains("interactsh")
             || payload.contains("localhost:")
             || payload.contains("example.com")
-    }
-
-    #[allow(dead_code)]
-    pub async fn register_callback(&self, payload: String) {
-        let mut results = self.callback_results.lock().await;
-        results
-            .entry("incoming".to_string())
-            .or_insert_with(Vec::new)
-            .push(payload);
-    }
-
-    async fn report_callback_findings(&self) {
-        let results = self.callback_results.lock().await;
-        if !results.is_empty() {
-            println!("\n[*] Callback results: {:?}", results);
-        }
     }
 
     pub fn get_callback_url(&self) -> String {

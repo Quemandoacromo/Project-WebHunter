@@ -85,7 +85,7 @@ impl<'a> BypassScanner<'a> {
 
     fn load_header_payloads() -> Vec<(String, String)> {
         let mut payloads = Vec::new();
-        if let Ok(file) = fs::File::open("webhunter/wordlists/http_headers.txt") {
+        if let Ok(file) = fs::File::open("wordlists/http_headers.txt") {
             let reader = io::BufReader::new(file);
             for line in reader.lines().map_while(Result::ok) {
                 let parts: Vec<&str> = line.splitn(2, ':').collect();

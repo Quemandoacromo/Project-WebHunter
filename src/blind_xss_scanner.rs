@@ -1,10 +1,10 @@
 use crate::blind_xss_server::{generate_payload_id, PayloadContext, PayloadTracker};
 use crate::form::Form;
+use crate::inject::{inject_form_field, inject_query_param};
 use crate::rate_limiter::RateLimiter;
 use crate::reporter::Reporter;
 use chrono::Utc;
 use indicatif::ProgressBar;
-use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
@@ -93,10 +93,8 @@ impl<'a> BlindXssScanner<'a> {
 
                 // Track this payload
                 let context = PayloadContext {
-                    id: payload_id.clone(),
                     url: url.clone(),
                     parameter: param_name.clone(),
-                    timestamp: Utc::now(),
                     detected: false,
                 };
 
@@ -107,18 +105,7 @@ impl<'a> BlindXssScanner<'a> {
 
                 // Inject each payload variant
                 for payload in payloads {
-                    let mut new_query_parts = Vec::new();
-                    for (j, (key, value)) in query_pairs.iter().enumerate() {
-                        if param_index == j {
-                            new_query_parts.push(format!("{}={}", key, payload));
-                        } else {
-                            new_query_parts.push(format!("{}={}", key, value));
-                        }
-                    }
-
-                    let new_query = new_query_parts.join("&");
-                    let mut new_url = url.clone();
-                    new_url.set_query(Some(&new_query));
+                    let new_url = inject_query_param(url, param_index, |_| payload.to_string());
 
                     self.rate_limiter.wait().await;
                     let _ = client.get(new_url).send().await;
@@ -140,10 +127,8 @@ impl<'a> BlindXssScanner<'a> {
 
                 // Track this payload
                 let context = PayloadContext {
-                    id: payload_id.clone(),
                     url: form.url.clone(),
                     parameter: input.name.clone(),
-                    timestamp: Utc::now(),
                     detected: false,
                 };
 
@@ -154,14 +139,8 @@ impl<'a> BlindXssScanner<'a> {
 
                 // Inject each payload variant
                 for payload in payloads {
-                    let mut form_data = HashMap::new();
-                    for (j, inp) in form.inputs.iter().enumerate() {
-                        if input_index == j {
-                            form_data.insert(inp.name.clone(), payload.clone());
-                        } else {
-                            form_data.insert(inp.name.clone(), inp.value.clone());
-                        }
-                    }
+                    let form_data =
+                        inject_form_field(form, input_index, |_| payload.to_string());
 
                     let action_url = form.url.join(&form.action).unwrap_or(form.url.clone());
 
