@@ -45,7 +45,7 @@ impl<'a> ExposedFilesScanner<'a> {
             debug_paths,
             reporter,
             rate_limiter,
-            client: Client::new(),
+            client: crate::http_client(),
             found: HashSet::new(),
         }
     }

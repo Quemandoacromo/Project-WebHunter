@@ -105,7 +105,7 @@ impl Crawler {
                 self.visited_urls.insert(url.clone());
                 found_urls.push(url.clone());
 
-                let client = reqwest::Client::new();
+                let client = crate::http_client();
                 let user_agent = &self.user_agents[(depth as usize) % self.user_agents.len()];
                 let mut request = client.get(url.clone()).header("User-Agent", user_agent);
 

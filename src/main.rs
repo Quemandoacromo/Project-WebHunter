@@ -36,6 +36,16 @@ struct Config {
     request_delay: Duration,
 }
 
+/// Shared HTTP client with a sane request timeout. The crawler and scanners
+/// previously used bare `Client::new()` with no timeout, so a single hung
+/// request (e.g. a Cloudflare-fronted box) stalled a whole scan forever.
+pub fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("failed to build HTTP client")
+}
+
 fn configure_rate_limit() -> Config {
     loop {
         let rps_input: String = Input::with_theme(&ColorfulTheme::default())
@@ -386,7 +396,7 @@ async fn run_scan(cli: &Cli, rate_limiter: &Arc<rate_limiter::RateLimiter>, targ
                     dom_xss_scanner::DomXssScanner::new(&reporter, Arc::clone(rate_limiter));
 
                 // Fetch and analyze each page for DOM XSS
-                let client = reqwest::Client::new();
+                let client = http_client();
                 for page_url in found_urls {
                     rate_limiter.wait().await;
 
@@ -449,7 +459,7 @@ async fn run_scan(cli: &Cli, rate_limiter: &Arc<rate_limiter::RateLimiter>, targ
         }
         2 => {
             let (found_urls, found_forms) =
-                match collect_scan_targets(cli, &url, &m, &sty, rate_limiter, false).await {
+                match collect_scan_targets(cli, &url, &m, &sty, rate_limiter, true).await {
                     Ok(targets) => targets,
                     Err(_) => return,
                 };
@@ -470,7 +480,7 @@ async fn run_scan(cli: &Cli, rate_limiter: &Arc<rate_limiter::RateLimiter>, targ
         }
         3 => {
             let (found_urls, found_forms) =
-                match collect_scan_targets(cli, &url, &m, &sty, rate_limiter, false).await {
+                match collect_scan_targets(cli, &url, &m, &sty, rate_limiter, true).await {
                     Ok(targets) => targets,
                     Err(_) => return,
                 };
@@ -587,7 +597,7 @@ async fn run_scan(cli: &Cli, rate_limiter: &Arc<rate_limiter::RateLimiter>, targ
         8 => {
             // Blind XSS Scanner
             let (found_urls, found_forms) =
-                match collect_scan_targets(cli, &url, &m, &sty, rate_limiter, false).await {
+                match collect_scan_targets(cli, &url, &m, &sty, rate_limiter, true).await {
                     Ok(targets) => targets,
                     Err(_) => return,
                 };

@@ -78,7 +78,7 @@ impl<'a> BlindXssScanner<'a> {
     }
 
     async fn scan_urls(&self, pb: &ProgressBar) -> Result<(), reqwest::Error> {
-        let client = reqwest::Client::new();
+        let client = crate::http_client();
 
         for url in &self.target_urls {
             let query_pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
@@ -117,7 +117,7 @@ impl<'a> BlindXssScanner<'a> {
     }
 
     async fn scan_forms(&self, pb: &ProgressBar) -> Result<(), reqwest::Error> {
-        let client = reqwest::Client::new();
+        let client = crate::http_client();
 
         for form in &self.forms {
             for (input_index, input) in form.inputs.iter().enumerate() {

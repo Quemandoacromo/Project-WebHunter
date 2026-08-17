@@ -46,7 +46,7 @@ impl<'a> CorsScanner<'a> {
             test_origins,
             reporter,
             rate_limiter,
-            client: Client::new(),
+            client: crate::http_client(),
             found: HashSet::new(),
         }
     }

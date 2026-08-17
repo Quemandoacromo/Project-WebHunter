@@ -84,6 +84,7 @@ impl<'a> AuthBypassScanner<'a> {
     pub async fn scan(&self, pb: &ProgressBar) -> Result<(), reqwest::Error> {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none()) // We want to detect redirects manually
+            .timeout(std::time::Duration::from_secs(10))
             .build()?;
 
         for form in &self.forms {

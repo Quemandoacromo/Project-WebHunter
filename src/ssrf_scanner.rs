@@ -114,7 +114,7 @@ impl<'a> SsrfScanner<'a> {
             ssrf_params,
             reporter,
             rate_limiter,
-            client: Client::new(),
+            client: crate::http_client(),
             found: HashSet::new(),
             callback_url,
         }

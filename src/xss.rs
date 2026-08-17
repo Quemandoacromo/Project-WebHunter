@@ -81,7 +81,7 @@ impl<'a> XssScanner<'a> {
     }
 
     async fn scan_urls(&self) -> Result<(), reqwest::Error> {
-        let client = reqwest::Client::new();
+        let client = crate::http_client();
 
         for url in &self.target_urls {
             let query_pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
@@ -125,7 +125,7 @@ impl<'a> XssScanner<'a> {
     }
 
     async fn scan_forms(&self) -> Result<(), reqwest::Error> {
-        let client = reqwest::Client::new();
+        let client = crate::http_client();
 
         for form in &self.forms {
             'input_loop: for i in 0..form.inputs.len() {
@@ -202,7 +202,12 @@ impl<'a> XssScanner<'a> {
         let document = Html::parse_document(&decoded_body);
         let script_selector = Selector::parse("script").unwrap();
         for element in document.select(&script_selector) {
-            if element.inner_html().contains(payload) {
+            // Only a payload that lands OUTSIDE a string literal is executable
+            // JS. Frameworks like Next.js echo the request URL inside a JSON
+            // string within a <script> block (flight data) — matching that is
+            // a false positive. Note: this treats template-literal
+            // interpolation as inert too; exotic ${...} sinks are out of scope.
+            if payload_outside_strings(&element.inner_html(), payload) {
                 return true;
             }
         }
@@ -242,6 +247,38 @@ impl<'a> XssScanner<'a> {
 
         false
     }
+}
+
+/// Returns true if `payload` appears in `script_body` at a position that is
+/// not inside a quoted string literal (`'`, `"`, or backtick). Payload echoes
+/// trapped inside a string (e.g. Next.js flight-data JSON) are inert data, not
+/// executable code.
+fn payload_outside_strings(script_body: &str, payload: &str) -> bool {
+    let bytes = script_body.as_bytes();
+    let mut in_string: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if let Some(quote) = in_string {
+            if bytes[i] == b'\\' {
+                i += 2; // skip escape sequence (\', \", \\, \uXXXX, ...)
+                continue;
+            }
+            if bytes[i] == quote {
+                in_string = None;
+            }
+            i += 1;
+            continue;
+        }
+        if script_body[i..].starts_with(payload) {
+            return true;
+        }
+        match bytes[i] {
+            b'\'' | b'"' | b'`' => in_string = Some(bytes[i]),
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -296,6 +333,49 @@ mod tests {
         assert!(
             !scanner.is_vulnerable(body, payload),
             "Should not detect XSS when payload not present"
+        );
+    }
+
+    #[test]
+    fn test_is_vulnerable_ignores_json_string_echo() {
+        let reporter = Arc::new(crate::reporter::Reporter::new(
+            Url::parse("https://example.com").unwrap(),
+        ));
+        let rate_limiter = Arc::new(RateLimiter::new(std::time::Duration::from_millis(100)));
+        let scanner = XssScanner::new(vec![], vec![], &reporter, rate_limiter);
+
+        // Next.js flight-data shape: request URL echoed inside a JSON string
+        // within a <script> block. The payload is inert data — must NOT fire.
+        let payload = "window['alert'](document['domain'])";
+        let body = format!(
+            "<html><body><script>self.__next_f.push([1,\"pathname\":\"/login?callbackUrl={}\"])</script></body></html>",
+            payload
+        );
+
+        assert!(
+            !scanner.is_vulnerable(&body, payload),
+            "Payload echoed inside a JSON string must not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_is_vulnerable_executable_code_with_strings_around() {
+        let reporter = Arc::new(crate::reporter::Reporter::new(
+            Url::parse("https://example.com").unwrap(),
+        ));
+        let rate_limiter = Arc::new(RateLimiter::new(std::time::Duration::from_millis(100)));
+        let scanner = XssScanner::new(vec![], vec![], &reporter, rate_limiter);
+
+        // Payload lands as real code (outside strings) — must still fire.
+        let payload = "window['alert'](document['domain'])";
+        let body = format!(
+            "<html><body><script>var x = \"safe\"; {}</script></body></html>",
+            payload
+        );
+
+        assert!(
+            scanner.is_vulnerable(&body, payload),
+            "Payload in executable position must still be detected"
         );
     }
 
