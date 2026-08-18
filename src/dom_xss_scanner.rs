@@ -225,7 +225,7 @@ mod tests {
         let script = "element.innerHTML = location.hash;";
 
         let vulns = scanner.analyze_script(&url, script, 1);
-        assert!(vulns.len() > 0);
+        assert!(!vulns.is_empty());
         assert_eq!(vulns[0].sink, "innerHTML");
         assert_eq!(vulns[0].severity, "High");
     }
@@ -237,7 +237,7 @@ mod tests {
         let script = "document.write(document.URL);";
 
         let vulns = scanner.analyze_script(&url, script, 1);
-        assert!(vulns.len() > 0);
+        assert!(!vulns.is_empty());
         assert!(vulns[0].source.contains("document.URL"));
         assert!(vulns[0].sink.contains("document.write"));
     }
@@ -253,9 +253,8 @@ mod tests {
         "#;
 
         let vulns = scanner.analyze_script(&url, script, 1);
-        assert_eq!(
-            vulns.len(),
-            0,
+        assert!(
+            vulns.is_empty(),
             "Safe code should not trigger false positives"
         );
     }
@@ -267,7 +266,7 @@ mod tests {
         let script = "setTimeout(location.search, 1000);";
 
         let vulns = scanner.analyze_script(&url, script, 1);
-        assert!(vulns.len() > 0);
+        assert!(!vulns.is_empty());
         assert!(vulns[0].source.contains("location"));
         assert_eq!(vulns[0].sink, "setTimeout");
     }

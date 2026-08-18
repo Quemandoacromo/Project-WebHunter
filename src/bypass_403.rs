@@ -287,7 +287,6 @@ fn print_fancy_bypass(bypass: &BypassBypass, status: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockito;
 
     fn create_test_scanner(base_url: Url) -> BypassScanner<'static> {
         let reporter = Box::leak(Box::new(Arc::new(Reporter::new(

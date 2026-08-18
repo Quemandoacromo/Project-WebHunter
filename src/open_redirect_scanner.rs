@@ -185,39 +185,42 @@ impl<'a> OpenRedirectScanner<'a> {
 }
 
 /// Extract the attacker-controlled host from a payload so detection can look
-/// for it in Location headers and redirect markers. Handles scheme prefixes,
-/// leading slashes (//, /\, %2f, %5c), and encoded control chars.
+/// for it in Location headers and redirect markers. Percent-encoding is
+/// decoded first so fully-encoded hosts (`%67%6f%6f%67%6c%65%2e%63%6f%6d`)
+/// resolve; handles scheme prefixes, leading slashes (//, /\, %2f, %5c),
+/// encoded control chars, and `@`-userinfo tricks
+/// (`whitelisteddomain.tld@google.com` → `google.com`).
 fn payload_host(payload: &str) -> String {
-    let mut p = payload.trim_start_matches('/').trim_start_matches('\\');
+    let decoded = crate::inject::decode_percent_encoding(payload);
+    let mut p = decoded.trim_start_matches(['/', '\\', '\t', '\n', '\r']);
     for scheme in ["https:", "http:", "javascript:"] {
         if let Some(rest) = p.strip_prefix(scheme) {
-            p = rest.trim_start_matches('/').trim_start_matches('\\');
+            p = rest.trim_start_matches(['/', '\\', '\t', '\n', '\r']);
             break;
         }
     }
-    // Strip encoded leading slashes: %2f, %5c, and control chars (%09, %0a, %0d).
+    // Strip encoded leading slashes (double-encoded: %252f → %2f → /).
     loop {
         let lower = p.to_lowercase();
-        if lower.starts_with("%2f")
-            || lower.starts_with("%5c")
-            || lower.starts_with("%09")
-            || lower.starts_with("%0a")
-            || lower.starts_with("%0d")
-        {
-            p = p[3..].trim_start_matches('/').trim_start_matches('\\');
+        if lower.starts_with("%2f") || lower.starts_with("%5c") {
+            p = p[3..].trim_start_matches(['/', '\\', '\t', '\n', '\r']);
         } else {
             break;
         }
     }
-    // Host ends at the first slash, backslash, query/fragment, or encoded
-    // control char (e.g. `javascript://evil.com%0aalert(1)`).
+    // Host ends at the first slash, backslash, query/fragment, or control char.
     let mut end = p.len();
-    for delim in ["/", "\\", "?", "#", "%0a", "%0d", "%09", "%00"] {
+    for delim in ['/', '\\', '?', '#', '\t', '\n', '\r'] {
         if let Some(idx) = p.find(delim) {
             end = end.min(idx);
         }
     }
-    p[..end].to_string()
+    let host = p[..end].to_string();
+    // `//allowlisted.tld@evil.com` — the effective redirect host is after `@`.
+    match host.rfind('@') {
+        Some(idx) => host[idx + 1..].to_string(),
+        None => host,
+    }
 }
 
 /// Returns the redirect target when the response redirects (3xx Location
@@ -312,6 +315,51 @@ mod tests {
     #[test]
     fn test_payload_host_js_scheme() {
         assert_eq!(payload_host("javascript://evil.com%0aalert(1)"), "evil.com");
+    }
+
+    #[test]
+    fn test_payload_host_hex_encoded() {
+        // %68%74%74%70%3a%2f%2f%67%6f%6f%67%6c%65%2e%63%6f%6d = http://google.com
+        assert_eq!(
+            payload_host("%68%74%74%70%3a%2f%2f%67%6f%6f%67%6c%65%2e%63%6f%6d"),
+            "google.com"
+        );
+        assert_eq!(
+            payload_host("/%68%74%74%70%3a%2f%2f%67%6f%6f%67%6c%65%2e%63%6f%6d"),
+            "google.com"
+        );
+    }
+
+    #[test]
+    fn test_payload_host_userinfo_trick() {
+        // The effective redirect host is after the @.
+        assert_eq!(
+            payload_host("//www.whitelisteddomain.tld@google.com"),
+            "google.com"
+        );
+        assert_eq!(
+            payload_host("/%09/www.whitelisteddomain.tld@google.com"),
+            "google.com"
+        );
+    }
+
+    #[test]
+    fn test_payload_host_decoded_control_chars() {
+        assert_eq!(payload_host("/%09/evil.com"), "evil.com");
+        assert_eq!(payload_host("//%5cexample.com"), "example.com");
+    }
+
+    #[test]
+    fn test_payload_host_obfuscated_ips() {
+        // Octal / hex IP forms are valid redirect hosts.
+        assert_eq!(payload_host("http://0xd8.0x3a.0xd6.0xce"), "0xd8.0x3a.0xd6.0xce");
+        assert_eq!(payload_host("http://0330.072.0326.0316"), "0330.072.0326.0316");
+    }
+
+    #[test]
+    fn test_payload_host_unicode_confusables() {
+        // Ideographic full stops and Unicode dots are host characters.
+        assert_eq!(payload_host("〱google.com"), "〱google.com");
     }
 
     #[test]
